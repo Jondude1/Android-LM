@@ -9,4 +9,6 @@ An LM Studio for your phone. Everything runs on the device: models, chats and th
 - **LM Studio / OpenAI compatible local server** (`/v1/chat/completions`, `/v1/models`), loopback by default.
 - **Self-updating**: every push builds a signed APK on GitHub Actions and publishes a release; the app installs updates itself.
 
+Research on running bigger models: [docs/RUNNING-BIGGER-MODELS.md](docs/RUNNING-BIGGER-MODELS.md)
+
 Build locally: `scripts/fetch-deps.sh && ./gradlew assembleRelease` (JDK 17, Android SDK, NDK 29).
