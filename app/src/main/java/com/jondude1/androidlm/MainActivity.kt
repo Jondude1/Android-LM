@@ -61,10 +61,18 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         val c = container
         setContent { AndroidLmTheme { Root(c) } }
-        if (c.settings.value.serverAutostart && !c.server.state.value.running) {
+        // Other apps (ATLAS) wake the server with this action; stay out of the way and keep it up from then on.
+        val serve = intent?.action == ACTION_SERVE
+        if (serve && !c.settings.value.serverAutostart) c.settings.update { copy(serverAutostart = true) }
+        if ((serve || c.settings.value.serverAutostart) && !c.server.state.value.running) {
             LmService.start(this)
             c.server.start()
         }
+        if (serve) moveTaskToBack(true)
+    }
+
+    companion object {
+        const val ACTION_SERVE = "com.jondude1.androidlm.SERVE"
     }
 }
 
