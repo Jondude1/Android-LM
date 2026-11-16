@@ -170,8 +170,22 @@ private fun Discover(c: AppContainer) {
     var open by remember { mutableStateOf<HfModel?>(null) }
     var choices by remember { mutableStateOf<List<HfChoice>>(emptyList()) }
     var loadingChoices by remember { mutableStateOf(false) }
+    var recs by remember { mutableStateOf<List<Recommendation>?>(null) }
+    var loadingRecs by remember { mutableStateOf(false) }
+    var searched by remember { mutableStateOf(false) }
+
+    fun loadRecs() {
+        if (loadingRecs || settings.offlineMode) return
+        scope.launch {
+            loadingRecs = true; error = null
+            runCatching { recommendForThisPhone(c, settings.hfToken) }.onSuccess { recs = it }.onFailure { error = it.message }
+            loadingRecs = false
+        }
+    }
+    androidx.compose.runtime.LaunchedEffect(settings.offlineMode) { if (recs == null) loadRecs() }
 
     fun search() {
+        searched = true
         scope.launch {
             searching = true; error = null
             runCatching { c.hf.search(query.ifBlank { "gguf" }, settings.hfToken) }
@@ -194,6 +208,28 @@ private fun Discover(c: AppContainer) {
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (!searched) {
+                item {
+                    Text("Recommended for this phone", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    Text(
+                        "Only models that fit in this phone's memory and should generate at ${MIN_USABLE_TPS.toInt()}+ tokens/s are listed, biggest first. Search below to look further.",
+                        style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    if (loadingRecs) { Text("Checking what fits...", style = MaterialTheme.typography.bodySmall); LinearProgressIndicator(Modifier.fillMaxWidth()) }
+                    if (recs?.isEmpty() == true) Text("Nothing suitable found right now. Try a search, or check your connection.", style = MaterialTheme.typography.bodySmall)
+                }
+                items(recs.orEmpty(), key = { it.repo + it.choice.label }) { r ->
+                    SectionCard {
+                        Text(r.repo.substringAfter('/'), style = MaterialTheme.typography.titleSmall)
+                        Text(r.choice.label, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Pill(r.report.fit.label, fitColor(r.report.fit))
+                            Text("${fmtBytes(r.choice.totalBytes)} - about ${fmtTps(r.report.estTps)}", Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                            Button({ c.downloads.enqueue(r.repo, r.choice) }) { Text("Get") }
+                        }
+                    }
+                }
+            }
             items(results, key = { it.id }) { r ->
                 SectionCard(modifier = Modifier.clickable {
                     open = r; choices = emptyList(); loadingChoices = true
@@ -215,14 +251,14 @@ private fun Discover(c: AppContainer) {
             title = { Text(repo.id, style = MaterialTheme.typography.titleSmall) },
             text = {
                 if (loadingChoices) Text("Loading file list...")
-                else if (choices.isEmpty()) Text("No GGUF files found.")
+                else if (choices.none { worksOnThisPhone(c, repo.id, it) != null }) Text("No file in this repository fits and runs well on this phone (${choices.size} checked). Try a smaller model or a lower-bit version.")
                 else LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    items(choices, key = { it.label }) { ch ->
-                        val rep = c.planner.assess(ch.totalBytes, com.jondude1.androidlm.models.ModelInfo(nParams = 0))
+                    items(choices.filter { worksOnThisPhone(c, repo.id, it) != null }, key = { it.label }) { ch ->
+                        val rep = worksOnThisPhone(c, repo.id, ch)!!
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(ch.label, style = MaterialTheme.typography.bodyMedium, maxLines = 2)
-                                Text(fmtBytes(ch.totalBytes) + if (ch.files.size > 1) " - ${ch.files.size} parts" else "", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text(fmtBytes(ch.totalBytes) + (if (ch.files.size > 1) " - ${ch.files.size} parts" else "") + " - about ${fmtTps(rep.estTps)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             Pill(rep.fit.label, fitColor(rep.fit))
                             TextButton({ c.downloads.enqueue(repo.id, ch); open = null }) { Text("Get") }
