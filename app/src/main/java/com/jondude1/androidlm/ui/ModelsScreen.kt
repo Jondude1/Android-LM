@@ -182,7 +182,9 @@ private fun Discover(c: AppContainer) {
             loadingRecs = false
         }
     }
-    androidx.compose.runtime.LaunchedEffect(settings.offlineMode) { if (recs == null) loadRecs() }
+    val tuneVer by c.tuneStore.version.collectAsState()
+    // Re-check when offline mode changes or the tuner measures this phone's real speed.
+    androidx.compose.runtime.LaunchedEffect(settings.offlineMode, tuneVer) { loadRecs() }
 
     fun search() {
         searched = true
