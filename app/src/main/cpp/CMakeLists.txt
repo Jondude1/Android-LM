@@ -47,6 +47,8 @@ set(OPENCL_ICD_LOADER_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
 add_subdirectory("${TP}/OpenCL-Headers"      "${CMAKE_BINARY_DIR}/opencl-headers" EXCLUDE_FROM_ALL)
 add_subdirectory("${TP}/OpenCL-ICD-Loader"   "${CMAKE_BINARY_DIR}/opencl-icd"     EXCLUDE_FROM_ALL)
+# Pin the stub's output location so the path handed to FindOpenCL really is produced by the OpenCL target.
+set_target_properties(OpenCL PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/opencl-icd")
 set(OpenCL_INCLUDE_DIR "${TP}/OpenCL-Headers" CACHE PATH "" FORCE)
 set(OpenCL_LIBRARY     "${CMAKE_BINARY_DIR}/opencl-icd/libOpenCL.so" CACHE FILEPATH "" FORCE)
 
@@ -56,7 +58,7 @@ file(GLOB _lm_glslc "${ANDROID_NDK}/shader-tools/*/glslc")
 list(GET _lm_glslc 0 _lm_glslc0)
 set(Vulkan_GLSLC_EXECUTABLE "${_lm_glslc0}" CACHE FILEPATH "" FORCE)
 set(Vulkan_INCLUDE_DIR      "${TP}/install/include" CACHE PATH "" FORCE)
-set(Vulkan_LIBRARY          "${CMAKE_SYSROOT}/usr/lib/${CMAKE_ANDROID_ARCH_TRIPLE}/${ANDROID_PLATFORM_LEVEL}/libvulkan.so" CACHE FILEPATH "" FORCE)
+set(Vulkan_LIBRARY          "${CMAKE_SYSROOT}/usr/lib/aarch64-linux-android/${ANDROID_PLATFORM_LEVEL}/libvulkan.so" CACHE FILEPATH "" FORCE)
 set(SPIRV-Headers_DIR       "${TP}/install/share/cmake/SPIRV-Headers" CACHE PATH "" FORCE)
 
 add_subdirectory("${LLAMA_DIR}" build-llama)
