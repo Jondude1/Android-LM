@@ -12,8 +12,8 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 
-/** A download the app is confident will fit and run at a usable speed on this phone. */
-data class Recommendation(val repo: String, val choice: HfChoice, val report: FitReport)
+/** A download the app is confident will fit and run at a usable speed on this phone. [paramsB] is the estimated model size in billions. */
+data class Recommendation(val repo: String, val choice: HfChoice, val report: FitReport, val paramsB: Double)
 
 /** Slowest generation speed (tokens/s) we are willing to recommend. */
 const val MIN_USABLE_TPS = 3.0
@@ -22,8 +22,43 @@ const val MIN_USABLE_TPS = 3.0
  * Before a file is downloaded its internals are unknown, so shape it from the repo name and file size: typical
  * layer / KV-head counts for its size class, and mixture-of-experts if the name says so (e.g. "30B-A3B").
  */
-fun guessInfo(repo: String, bytes: Long): ModelInfo {
-    val params = (bytes * 8.0 / 4.8).toLong().coerceAtLeast(1)
+/** Bits per weight for a quant named in a file name, or null if it is not a quantised file we trust (F16, unknown...). */
+fun quantBpw(label: String): Double? {
+    val n = label.lowercase()
+    return when {
+        Regex("""(^|[-_.])(f16|fp16|bf16|f32)([-_.]|$)""").containsMatchIn(n) -> null
+        "mmproj" in n -> null
+        "iq1" in n -> 1.8
+        "iq2" in n || "q2_k" in n -> if ("iq2" in n) 2.4 else 2.95
+        "iq3" in n -> 3.3
+        "q3_k" in n -> 3.9
+        "iq4" in n -> 4.5
+        "q4_k" in n || "q4_0" in n || "q4_1" in n || "mxfp4" in n -> 4.85
+        "q5_" in n -> 5.7
+        "q6_k" in n -> 6.6
+        "q8_0" in n -> 8.5
+        else -> null
+    }
+}
+
+/** Higher = better balance of quality and size for a phone. */
+private fun quantPreference(label: String): Int {
+    val n = label.lowercase()
+    return when {
+        "q4_k_m" in n -> 100
+        "q4_k_s" in n || "iq4_xs" in n || "iq4_nl" in n -> 95
+        "q4_0" in n || "mxfp4" in n || "q4_1" in n -> 90
+        "q5_k_m" in n || "q5_k_s" in n -> 80
+        "q3_k_m" in n || "q3_k_l" in n || "iq3" in n -> 70
+        "q6_k" in n -> 60
+        "q3_k_s" in n || "iq2" in n || "q2_k" in n -> 50
+        "q8_0" in n -> 40
+        else -> 0
+    }
+}
+
+fun guessInfo(repo: String, bytes: Long, bpw: Double = 4.8): ModelInfo {
+    val params = (bytes * 8.0 / bpw).toLong().coerceAtLeast(1)
     val b = params / 1e9
     val layers = when { b < 10 -> 32; b < 20 -> 40; b < 40 -> 64; else -> 80 }
     val moe = Regex("""(?i)\d+B[-_]?A\d+(\.\d+)?B|moe|mixtral""").containsMatchIn(repo)
@@ -35,9 +70,8 @@ fun guessInfo(repo: String, bytes: Long): ModelInfo {
 
 /** Fits in RAM with headroom and generates at a usable speed. Streaming-from-flash and too-big are never recommended. */
 fun worksOnThisPhone(c: AppContainer, repo: String, choice: HfChoice): FitReport? {
-    val name = choice.label.lowercase()
-    if ("mmproj" in name || "bf16" in name || "f32" in name) return null
-    val rep = c.planner.assess(choice.totalBytes, guessInfo(repo, choice.totalBytes))
+    val bpw = quantBpw(choice.label) ?: return null
+    val rep = c.planner.assess(choice.totalBytes, guessInfo(repo, choice.totalBytes, bpw))
     return if ((rep.fit == Fit.Comfortable || rep.fit == Fit.Tight) && rep.estTps >= MIN_USABLE_TPS) rep else null
 }
 
@@ -47,7 +81,7 @@ private val searches = listOf(
 
 /**
  * Looks up popular GGUF repos, and for each keeps the best (largest = most capable) file that really works on this phone.
- * Results are ordered biggest-first. Nothing that fails the fit-and-speed check is included.
+ * Results are ordered by estimated model size (a bigger model is generally more capable). Nothing that fails the fit-and-speed check is included.
  */
 suspend fun recommendForThisPhone(c: AppContainer, token: String): List<Recommendation> = coroutineScope {
     val repos = searches.map { q -> async(Dispatchers.IO) { runCatching { c.hf.search(q, token).take(5) }.getOrDefault(emptyList()) } }
@@ -57,10 +91,12 @@ suspend fun recommendForThisPhone(c: AppContainer, token: String): List<Recommen
         async(Dispatchers.IO) {
             gate.withPermit {
                 val choices = runCatching { c.hf.choices(r.id, token) }.getOrNull() ?: return@withPermit null
-                // prefer 4-bit K-quants when several sizes work: best quality per byte
-                choices.mapNotNull { ch -> worksOnThisPhone(c, r.id, ch)?.let { Recommendation(r.id, ch, it) } }
-                    .maxWithOrNull(compareBy({ it.choice.totalBytes }, { "q4_k_m" in it.choice.label.lowercase() }))
+                // Per repo: the best quant that works (Q4_K_M first), not simply the largest file.
+                choices.mapNotNull { ch ->
+                    val bpw = quantBpw(ch.label) ?: return@mapNotNull null
+                    worksOnThisPhone(c, r.id, ch)?.let { Recommendation(r.id, ch, it, ch.totalBytes * 8.0 / bpw / 1e9) }
+                }.maxWithOrNull(compareBy({ quantPreference(it.choice.label) }, { it.choice.totalBytes }))
             }
         }
-    }.awaitAll().filterNotNull().sortedByDescending { it.choice.totalBytes }.take(15)
+    }.awaitAll().filterNotNull().sortedByDescending { it.paramsB }.take(15)
 }

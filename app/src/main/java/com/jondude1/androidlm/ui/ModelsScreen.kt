@@ -128,7 +128,7 @@ private fun Library(c: AppContainer, chatVm: ChatViewModel, onOpenChat: () -> Un
 }
 
 @Composable
-private fun DownloadsCard(c: AppContainer) {
+fun DownloadsCard(c: AppContainer) {
     val items by c.downloads.items.collectAsState()
     SectionCard("Downloads") {
         items.forEach { d ->
@@ -209,12 +209,14 @@ private fun Discover(c: AppContainer) {
             listOf("qwen3", "gemma", "llama", "gpt-oss").forEach { s -> TextButton({ query = s; search() }) { Text(s) } }
         }
         error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall) }
+        val dls by c.downloads.items.collectAsState()
+        if (dls.isNotEmpty()) DownloadsCard(c)
         LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (!searched) {
                 item {
                     Text("Recommended for this phone", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                     Text(
-                        "Only models that fit in this phone's memory and should generate at ${MIN_USABLE_TPS.toInt()}+ tokens/s are listed, biggest first. Search below to look further.",
+                        "Only models that fit in this phone's memory and should generate at ${MIN_USABLE_TPS.toInt()}+ tokens/s are listed, largest first. Search below to look further.",
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     if (loadingRecs) { Text("Checking what fits...", style = MaterialTheme.typography.bodySmall); LinearProgressIndicator(Modifier.fillMaxWidth()) }

@@ -54,6 +54,7 @@ class DownloadManager(
     private fun patch(id: String, f: (DownloadItem) -> DownloadItem) = _items.update { l -> l.map { if (it.id == id) f(it) else it } }
 
     fun enqueue(repo: String, choice: HfChoice) {
+        if (_items.value.any { it.repo == repo && it.label == choice.label && it.state != DlState.Failed }) return // already queued or done
         val id = UUID.randomUUID().toString()
         _items.update { it + DownloadItem(id, repo, choice.label, choice.files, choice.totalBytes) }
         start(id)
